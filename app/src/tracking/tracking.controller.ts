@@ -96,6 +96,32 @@ export class TrackingController {
     );
   }
 
+  @Get('pathway-completion-status')
+  @ApiId(API_IDS.GET_PATHWAY_COMPLETION_STATUS)
+  @ApiOperation({
+    summary: 'Get aggregate course completion status for a pathway',
+    description:
+      'Returns total vs. completed course count for a user across every published course tied to a pathwayId, and whether all are complete. Used by user-service to decide when to fire a single pathway-completion notification instead of one per course.',
+  })
+  @ApiQuery({ name: 'pathwayId', type: String })
+  @ApiQuery({ name: 'userId', type: String })
+  @ApiResponse({
+    status: 200,
+    description: 'Pathway completion status retrieved successfully',
+  })
+  async getPathwayCompletionStatus(
+    @Query('pathwayId', ParseUUIDPipe) pathwayId: string,
+    @Query('userId', ParseUUIDPipe) userId: string,
+    @TenantOrg() tenant: { tenantId: string; organisationId: string },
+  ) {
+    return this.trackingService.getPathwayCompletionStatus(
+      pathwayId,
+      userId,
+      tenant.tenantId,
+      tenant.organisationId,
+    );
+  }
+
   @Patch('course/:courseId/:userId')
   @ApiId(API_IDS.UPDATE_COURSE_TRACKING)
   @ApiOperation({ summary: 'Update course tracking status' })

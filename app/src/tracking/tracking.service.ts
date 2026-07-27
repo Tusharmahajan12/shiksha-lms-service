@@ -800,9 +800,35 @@ export class TrackingService {
               select: ['courseId', 'title', 'notification_send', 'params'] as any,
             });
 
+            // Pathway completion — retried up to 3 times. Runs first so its response
+            // (pathwayType) can decide whether the per-course email below should fire.
+            // For VOLUNTEER pathways, user-service owns notifying the user once every
+            // course in the pathway is complete, so the per-course email is skipped here.
+            let pathwayNotifyResult: { pathwayType?: string; allCoursesCompleted?: boolean } | null = null;
+            if (course?.params?.pathwayId) {
+              for (let attempt = 1; attempt <= 3 && !pathwayNotifyResult; attempt++) {
+                try {
+                  pathwayNotifyResult = await this.notifyPathwayCourseCompleted(
+                    lessonTrack.userId,
+                    lessonTrack.courseId,
+                    tenantId,
+                    organisationId,
+                    authorization,
+                    course.params.pathwayId,
+                  );
+                } catch (err) {
+                  this.logger.error(`Pathway completion callback attempt ${attempt}/3 failed for user=${lessonTrack.userId} course=${lessonTrack.courseId}: ${err?.message}`);
+                }
+              }
+            }
+
             // Email notification — outcome drives whether notification_sent stays true.
             // RETRYABLE_FAILURE resets the flag so the next lesson update retries.
-            if (course?.notification_send === true) {
+            // Skipped for VOLUNTEER-pathway courses; if the webhook call above failed
+            // (pathwayNotifyResult is null), default to sending so a notification isn't
+            // silently dropped.
+            const skipEmailForVolunteerPathway = pathwayNotifyResult?.pathwayType === 'VOLUNTEER';
+            if (course?.notification_send === true && !skipEmailForVolunteerPathway) {
               const outcome = await this.courseCompletionNotification(
                 lessonTrack.userId,
                 lessonTrack.courseId,
@@ -821,24 +847,17 @@ export class TrackingService {
               }
             }
 
-            // Pathway completion — retried up to 3 times, independent of email outcome
-            if (course?.params?.pathwayId) {
-              let success = false;
-              for (let attempt = 1; attempt <= 3 && !success; attempt++) {
-                try {
-                  await this.notifyPathwayCourseCompleted(
-                    lessonTrack.userId,
-                    lessonTrack.courseId,
-                    tenantId,
-                    organisationId,
-                    authorization,
-                    course.params.pathwayId,
-                  );
-                  success = true;
-                } catch (err) {
-                  this.logger.error(`Pathway completion callback attempt ${attempt}/3 failed for user=${lessonTrack.userId} course=${lessonTrack.courseId}: ${err?.message}`);
-                }
-              }
+            // Pathway fully completed — user-service confirms every course in the
+            // pathway is done, LMS owns sending the actual email (same as the
+            // per-course email above), keeping all notification-sending in one place.
+            if (pathwayNotifyResult?.allCoursesCompleted && course?.params?.pathwayId) {
+              await this.pathwayCompletionNotification(
+                lessonTrack.userId,
+                course.params.pathwayId,
+                tenantId,
+                organisationId,
+                authorization,
+              );
             }
           }
         }
@@ -1891,6 +1910,57 @@ export class TrackingService {
   }
 
   /**
+   * Aggregate completion status for every course tied to a pathway, for one user.
+   * Fixed cost regardless of course count — one query for the course list, one
+   * IN-clause query for completion status. No per-course loop.
+   */
+  async getPathwayCompletionStatus(
+    pathwayId: string,
+    userId: string,
+    tenantId: string,
+    organisationId: string,
+  ): Promise<{
+    pathwayId: string;
+    userId: string;
+    totalCourses: number;
+    completedCourses: number;
+    allCompleted: boolean;
+  }> {
+    const courses = await this.courseRepository.find({
+      where: {
+        tenantId,
+        organisationId,
+        status: CourseStatus.PUBLISHED,
+        params: { pathwayId } as any,
+      } as FindOptionsWhere<Course>,
+      select: ['courseId'],
+    });
+
+    const courseIds = courses.map((c) => c.courseId);
+    const totalCourses = courseIds.length;
+
+    if (totalCourses === 0) {
+      return { pathwayId, userId, totalCourses: 0, completedCourses: 0, allCompleted: false };
+    }
+
+    const completedCourses = await this.courseTrackRepository.count({
+      where: {
+        userId,
+        courseId: In(courseIds),
+        status: TrackingStatus.COMPLETED,
+      } as FindOptionsWhere<CourseTrack>,
+    });
+
+    return {
+      pathwayId,
+      userId,
+      totalCourses,
+      completedCourses,
+      allCompleted: completedCourses >= totalCourses,
+    };
+  }
+
+  /**
    * Generic course completion notification.
    * Called when course.notification_send = true and courseTrack.notification_sent = false.
    * Returns a NotificationOutcome — never throws.
@@ -1980,8 +2050,10 @@ export class TrackingService {
 
   /**
    * Notifies user-service pathway module that a course was completed.
-   * Fire-and-forget — called after courseTrack.status transitions to COMPLETED.
-   * User-service marks the linked VOLUNTEER pathway history as COMPLETED and assigns tags.
+   * Called after courseTrack.status transitions to COMPLETED. User-service marks the
+   * linked pathway history as COMPLETED once all its courses are done, and returns
+   * pathwayType (so the caller can decide whether to also send the per-course email)
+   * and allCoursesCompleted (so the caller knows when to send the pathway-completion email).
    */
   private async notifyPathwayCourseCompleted(
     userId: string,
@@ -1990,13 +2062,13 @@ export class TrackingService {
     organisationId: string,
     authorization?: string,
     pathwayId?: string,
-  ): Promise<void> {
+  ): Promise<{ pathwayType?: string; allCoursesCompleted?: boolean } | null> {
     const userServiceUrl = this.configService.get<string>('USER_SERVICE_URL', '');
-    if (!userServiceUrl) return;
+    if (!userServiceUrl) return null;
 
     const token = authorization || `Bearer ${this.configService.get<string>('USER_SERVICE_ACCESS_TOKEN', '')}`;
 
-    await axios.post(
+    const res = await axios.post(
       `${userServiceUrl}/pathway/course-completed`,
       { userId, courseId, pathwayId, tenantId, organisationId },
       {
@@ -2010,5 +2082,86 @@ export class TrackingService {
       },
     );
     this.logger.log(`[Pathway] Notified user-service: userId=${userId} courseId=${courseId} pathwayId=${pathwayId}`);
+    const result = res?.data?.result ?? res?.data ?? {};
+    return {
+      pathwayType: result?.pathwayType,
+      allCoursesCompleted: Boolean(result?.allCoursesCompleted),
+    };
+  }
+
+  /**
+   * Sends the single "volunteer pathway fully completed" email once user-service
+   * confirms every course in the pathway is done. Mirrors courseCompletionNotification's
+   * profile-fetch pattern. Never throws — logs and swallows failures.
+   */
+  private async pathwayCompletionNotification(
+    userId: string,
+    pathwayId: string,
+    tenantId: string,
+    organisationId: string,
+    authorization?: string,
+  ): Promise<void> {
+    const userServiceUrl = this.configService.get<string>('USER_SERVICE_URL', '');
+    const accessToken = authorization || this.configService.get<string>('USER_SERVICE_ACCESS_TOKEN', '');
+
+    if (!userServiceUrl) {
+      this.logger.warn('[Notification] USER_SERVICE_URL not configured — cannot send pathway completion email');
+      return;
+    }
+
+    const readUrl = `${userServiceUrl}/read/${userId}?fieldvalue=true`;
+    const requestHeaders: Record<string, string> = {
+      tenantid: tenantId,
+      organisationid: organisationId,
+      ...(accessToken && { authorization: accessToken }),
+    };
+
+    let email = '';
+    let firstName = '';
+    let lastName = '';
+    try {
+      const res = await axios.get(readUrl, { headers: requestHeaders, timeout: 30000 });
+      const userData = res?.data?.result?.userData ?? res?.data?.result ?? {};
+      email = userData?.email ?? '';
+      firstName = userData?.firstName ?? '';
+      lastName = userData?.lastName ?? '';
+    } catch (err) {
+      this.logger.warn(`[Notification] Could not fetch user profile for pathway completion email: GET ${readUrl} userId=${userId} error=${err?.message}`);
+      return;
+    }
+
+    if (!email) {
+      this.logger.warn(`[Notification] No email address in profile for userId=${userId} — skipping pathway completion email`);
+      return;
+    }
+
+    const notificationPayload = {
+      isQueue: false,
+      context: 'USER',
+      key: 'onVolunteerPathwayCompletion',
+      replacements: {
+        '{username}': `${firstName} ${lastName}`.trim(),
+        '{firstName}': firstName,
+        '{lastName}': lastName,
+        '{currentYear}': new Date().getFullYear(),
+      },
+      email: { recipients: [email] },
+    };
+
+    this.logger.log(`[Notification] Sending pathway completion email pathwayId=${pathwayId} userId=${userId}`);
+
+    try {
+      const mailSend = await this.lmsNotificationService.sendNotification(notificationPayload);
+      if (mailSend?.result?.email?.errors?.length > 0) {
+        const errorMessages = mailSend.result.email.errors
+          .map((e: any) => e?.error || JSON.stringify(e))
+          .join(', ');
+        this.logger.warn(`[Notification] Pathway completion email delivery failed userId=${userId} pathwayId=${pathwayId} errors=${errorMessages}`);
+        return;
+      }
+      this.logger.log(`[Notification] Pathway completion email sent successfully userId=${userId} pathwayId=${pathwayId}`);
+    } catch (err) {
+      this.logger.error(`[Notification] sendNotification threw for pathway completion userId=${userId} pathwayId=${pathwayId}: ${err?.message}`);
+    }
   }
 }
