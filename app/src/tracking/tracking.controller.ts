@@ -9,6 +9,7 @@ import {
   Patch,
   HttpCode,
   HttpStatus,
+  Headers,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -89,6 +90,32 @@ export class TrackingController {
   ) {
     return this.trackingService.getCourseTracking(
       courseId,
+      userId,
+      tenant.tenantId,
+      tenant.organisationId,
+    );
+  }
+
+  @Get('pathway-completion-status')
+  @ApiId(API_IDS.GET_PATHWAY_COMPLETION_STATUS)
+  @ApiOperation({
+    summary: 'Get aggregate course completion status for a pathway',
+    description:
+      'Returns total vs. completed course count for a user across every published course tied to a pathwayId, and whether all are complete. Used by user-service to decide when to fire a single pathway-completion notification instead of one per course.',
+  })
+  @ApiQuery({ name: 'pathwayId', type: String })
+  @ApiQuery({ name: 'userId', type: String })
+  @ApiResponse({
+    status: 200,
+    description: 'Pathway completion status retrieved successfully',
+  })
+  async getPathwayCompletionStatus(
+    @Query('pathwayId', ParseUUIDPipe) pathwayId: string,
+    @Query('userId', ParseUUIDPipe) userId: string,
+    @TenantOrg() tenant: { tenantId: string; organisationId: string },
+  ) {
+    return this.trackingService.getPathwayCompletionStatus(
+      pathwayId,
       userId,
       tenant.tenantId,
       tenant.organisationId,
@@ -235,7 +262,8 @@ export class TrackingController {
     @Param('attemptId', ParseUUIDPipe) attemptId: string,
     @Body() UpdateLessonTrackingDto: UpdateLessonTrackingDto,
     @Query() query: CommonQueryDto,
-    @TenantOrg() tenant: { tenantId: string; organisationId: string },
+    @TenantOrg() tenant: {tenantId: string, organisationId: string},
+    @Headers('authorization') authorization?: string,
   ): Promise<LessonTrack> {
     return this.trackingService.updateProgress(
       attemptId,
@@ -243,6 +271,7 @@ export class TrackingController {
       query.userId,
       tenant.tenantId,
       tenant.organisationId,
+      authorization,
     );
   }
 
