@@ -1926,15 +1926,18 @@ export class TrackingService {
     completedCourses: number;
     allCompleted: boolean;
   }> {
-    const courses = await this.courseRepository.find({
-      where: {
-        tenantId,
-        organisationId,
-        status: CourseStatus.PUBLISHED,
-        params: { pathwayId } as any,
-      } as FindOptionsWhere<Course>,
-      select: ['courseId'],
-    });
+    // Plain object equality on a jsonb column (params: { pathwayId }) only matches when
+    // params is EXACTLY that one key — any course whose params also has cohortId or other
+    // metadata (the normal case) would be silently excluded, undercounting totalCourses.
+    // Use the jsonb ->> operator instead, matching the pattern in aspire-leader.service.ts.
+    const courses = await this.courseRepository
+      .createQueryBuilder('course')
+      .where('course.tenantId = :tenantId', { tenantId })
+      .andWhere('course.organisationId = :organisationId', { organisationId })
+      .andWhere('course.status = :status', { status: CourseStatus.PUBLISHED })
+      .andWhere(`course."params"->>'pathwayId' = :pathwayId`, { pathwayId })
+      .select(['course.courseId'])
+      .getMany();
 
     const courseIds = courses.map((c) => c.courseId);
     const totalCourses = courseIds.length;
