@@ -2148,7 +2148,7 @@ export class TrackingService {
         '{lastName}': lastName,
         '{currentYear}': new Date().getFullYear(),
       },
-      email: { recipients: [email] },
+      email: { receipients: [email] },
     };
 
     this.logger.log(`[Notification] Sending pathway completion email pathwayId=${pathwayId} userId=${userId}`);

@@ -8,7 +8,7 @@ export interface NotificationPayload {
   key: string;
   replacements?: Record<string, string | number>;
   email: {
-    recipients: string[];
+    receipients: string[];
   };
 }
 
