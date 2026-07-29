@@ -827,8 +827,8 @@ export class TrackingService {
             // Skipped for STANDARD-pathway courses; if the webhook call above failed
             // (pathwayNotifyResult is null), default to sending so a notification isn't
             // silently dropped.
-            const skipEmailForVolunteerPathway = pathwayNotifyResult?.pathwayType === 'STANDARD';
-            if (course?.notification_send === true && !skipEmailForVolunteerPathway) {
+            const skipEmailForStandardPathway = pathwayNotifyResult?.pathwayType === 'STANDARD';
+            if (course?.notification_send === true && !skipEmailForStandardPathway) {
               const outcome = await this.courseCompletionNotification(
                 lessonTrack.userId,
                 lessonTrack.courseId,
