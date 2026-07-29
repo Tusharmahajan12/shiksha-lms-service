@@ -2029,7 +2029,7 @@ export class TrackingService {
         '{programName}': courseTitle,
         '{currentYear}': new Date().getFullYear(),
       },
-      email: { recipients: [email] },
+      email: { receipients: [email] },
     };
 
     this.logger.log(`[Notification] Sending course completion email course=${courseId} userId=${userId}`);
