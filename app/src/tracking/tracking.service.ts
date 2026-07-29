@@ -824,10 +824,10 @@ export class TrackingService {
 
             // Email notification — outcome drives whether notification_sent stays true.
             // RETRYABLE_FAILURE resets the flag so the next lesson update retries.
-            // Skipped for VOLUNTEER-pathway courses; if the webhook call above failed
+            // Skipped for STANDARD-pathway courses; if the webhook call above failed
             // (pathwayNotifyResult is null), default to sending so a notification isn't
             // silently dropped.
-            const skipEmailForVolunteerPathway = pathwayNotifyResult?.pathwayType === 'VOLUNTEER';
+            const skipEmailForVolunteerPathway = pathwayNotifyResult?.pathwayType === 'STANDARD';
             if (course?.notification_send === true && !skipEmailForVolunteerPathway) {
               const outcome = await this.courseCompletionNotification(
                 lessonTrack.userId,
