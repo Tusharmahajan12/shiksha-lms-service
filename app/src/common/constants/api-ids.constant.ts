@@ -73,4 +73,5 @@ export const API_IDS = {
   GET_LESSON_COMPLETION_STATUS: 'api.lesson.completion.status',
   UPDATE_TEST_PROGRESS: 'api.tracking.update_test_progress',
   GET_AGGREGATED_CONTENT: 'api.course.aggregate.content',
+  GET_AGGREGATED_COURSES: 'api.course.aggregate.course',
 };
