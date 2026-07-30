@@ -882,6 +882,7 @@ export class TrackingService {
         // silently dropped.
         const skipEmailForStandardPathway = pathwayNotifyResult?.pathwayType === 'STANDARD';
 
+        /* enable this block if you want to send email notification for course completion
         if (
           course?.notification_send === true &&
           !skipEmailForStandardPathway &&
@@ -912,6 +913,7 @@ export class TrackingService {
             );
           }
         }
+        */
 
         // Pathway fully completed — user-service confirms every course in the
         // pathway is done, LMS owns sending the actual email (same as the
