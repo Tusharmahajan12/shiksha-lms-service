@@ -804,7 +804,7 @@ export class TrackingService {
             // that pathway is completed for this user before doing anything else —
             // both the pathway-completion callback and the per-course email below
             // only fire once the whole pathway is done.
-            let pathwayFullyCompleted = true;
+            let isAllCoursesCompleted = true;
             let pathwayCourseIds: string[] = [];
             if (course?.params?.pathwayId) {
               const pathwayStatus = await this.getPathwayCompletionStatus(
@@ -813,9 +813,9 @@ export class TrackingService {
                 tenantId,
                 organisationId,
               );
-              pathwayFullyCompleted = pathwayStatus.allCompleted;
+              isAllCoursesCompleted = pathwayStatus.allCompleted;
 
-              if (pathwayFullyCompleted) {
+              if (isAllCoursesCompleted) {
                 const pathwayCourses = await this.courseRepository
                   .createQueryBuilder('course')
                   .where('course.tenantId = :tenantId', { tenantId })
@@ -835,7 +835,7 @@ export class TrackingService {
             // For VOLUNTEER pathways, user-service owns notifying the user once every
             // course in the pathway is complete, so the per-course email is skipped here.
             let pathwayNotifyResult: { pathwayType?: string; allCoursesCompleted?: boolean } | null = null;
-            if (course?.params?.pathwayId && pathwayFullyCompleted) {
+            if (course?.params?.pathwayId && isAllCoursesCompleted) {
               for (let attempt = 1; attempt <= 3 && !pathwayNotifyResult; attempt++) {
                 try {
                   pathwayNotifyResult = await this.notifyPathwayCourseCompleted(
@@ -862,7 +862,7 @@ export class TrackingService {
             if (
               course?.notification_send === true &&
               !skipEmailForStandardPathway &&
-              pathwayFullyCompleted
+              isAllCoursesCompleted
             ) {
               const outcome = await this.courseCompletionNotification(
                 lessonTrack.userId,
