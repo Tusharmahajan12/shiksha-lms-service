@@ -800,12 +800,42 @@ export class TrackingService {
               select: ['courseId', 'title', 'notification_send', 'params'] as any,
             });
 
+            // If this course belongs to a pathway, resolve whether every course in
+            // that pathway is completed for this user before doing anything else —
+            // both the pathway-completion callback and the per-course email below
+            // only fire once the whole pathway is done.
+            let pathwayFullyCompleted = true;
+            let pathwayCourseIds: string[] = [];
+            if (course?.params?.pathwayId) {
+              const pathwayStatus = await this.getPathwayCompletionStatus(
+                course.params.pathwayId,
+                lessonTrack.userId,
+                tenantId,
+                organisationId,
+              );
+              pathwayFullyCompleted = pathwayStatus.allCompleted;
+
+              if (pathwayFullyCompleted) {
+                const pathwayCourses = await this.courseRepository
+                  .createQueryBuilder('course')
+                  .where('course.tenantId = :tenantId', { tenantId })
+                  .andWhere('course.organisationId = :organisationId', { organisationId })
+                  .andWhere('course.status = :status', { status: CourseStatus.PUBLISHED })
+                  .andWhere(`course."params"->>'pathwayId' = :pathwayId`, {
+                    pathwayId: course.params.pathwayId,
+                  })
+                  .select(['course.courseId'])
+                  .getMany();
+                pathwayCourseIds = pathwayCourses.map((c) => c.courseId);
+              }
+            }
+
             // Pathway completion — retried up to 3 times. Runs first so its response
             // (pathwayType) can decide whether the per-course email below should fire.
             // For VOLUNTEER pathways, user-service owns notifying the user once every
             // course in the pathway is complete, so the per-course email is skipped here.
             let pathwayNotifyResult: { pathwayType?: string; allCoursesCompleted?: boolean } | null = null;
-            if (course?.params?.pathwayId) {
+            if (course?.params?.pathwayId && pathwayFullyCompleted) {
               for (let attempt = 1; attempt <= 3 && !pathwayNotifyResult; attempt++) {
                 try {
                   pathwayNotifyResult = await this.notifyPathwayCourseCompleted(
@@ -828,7 +858,12 @@ export class TrackingService {
             // (pathwayNotifyResult is null), default to sending so a notification isn't
             // silently dropped.
             const skipEmailForStandardPathway = pathwayNotifyResult?.pathwayType === 'STANDARD';
-            if (course?.notification_send === true && !skipEmailForStandardPathway) {
+
+            if (
+              course?.notification_send === true &&
+              !skipEmailForStandardPathway &&
+              pathwayFullyCompleted
+            ) {
               const outcome = await this.courseCompletionNotification(
                 lessonTrack.userId,
                 lessonTrack.courseId,
@@ -844,6 +879,14 @@ export class TrackingService {
                   { notification_sent: false },
                 );
                 courseTrack.notification_sent = false;
+              } else if (pathwayCourseIds.length > 0) {
+                // One email covers the whole pathway — mark every course_track row
+                // for this user across the pathway's courses as notified, not just
+                // the one that triggered this run.
+                await this.courseTrackRepository.update(
+                  { userId: lessonTrack.userId, courseId: In(pathwayCourseIds) } as FindOptionsWhere<CourseTrack>,
+                  { notification_sent: true },
+                );
               }
             }
 
