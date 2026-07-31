@@ -206,7 +206,8 @@ export class TrackingService {
     lessonId: string,
     userId: string,
     tenantId: string,
-    organisationId: string
+    organisationId: string,
+    authorization?: string
   ): Promise<LessonTrack> {
     // OPTIMIZED: Get lesson details first
     const lesson = await this.lessonRepository.findOne({
@@ -304,7 +305,7 @@ export class TrackingService {
     // Update course and module tracking asynchronously (fire and forget) to avoid blocking response
     // This matches the pattern used in updateProgress for consistency
     if (savedLessonTrack.courseId) {
-      this.updateCourseAndModuleTracking(savedLessonTrack, tenantId, organisationId)
+      this.updateCourseAndModuleTracking(savedLessonTrack, tenantId, organisationId, authorization)
         .catch(err => this.logger.error('Failed to update course/module tracking asynchronously', err));
     }
 
@@ -1139,7 +1140,8 @@ export class TrackingService {
     eventId: string,
     updateEventProgressDto: UpdateEventProgressDto,
     tenantId: string,
-    organisationId: string
+    organisationId: string,
+    authorization?: string
   ): Promise<LessonTrack> {
     try {
       // Find lesson by media.source matching the eventId
@@ -1207,7 +1209,7 @@ export class TrackingService {
       // Update course and module tracking asynchronously (fire and forget) to avoid blocking response
       // Skip expensive operations for incomplete status - no need to recalculate course completion
       if (updatedAttempt.courseId && updatedAttempt.status !== TrackingStatus.INCOMPLETE) {
-        this.updateCourseAndModuleTracking(updatedAttempt, tenantId, organisationId)
+        this.updateCourseAndModuleTracking(updatedAttempt, tenantId, organisationId, authorization)
           .catch(err => this.logger.error('Failed to update course/module tracking asynchronously', err));
       }
 

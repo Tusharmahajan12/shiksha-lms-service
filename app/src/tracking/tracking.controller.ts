@@ -172,12 +172,14 @@ export class TrackingController {
     @Param('lessonId', ParseUUIDPipe) lessonId: string,
     @Query() query: CommonQueryDto,
     @TenantOrg() tenant: { tenantId: string; organisationId: string },
+    @Headers('authorization') authorization?: string,
   ) {
     return this.trackingService.startLessonAttempt(
       lessonId,
       query.userId,
       tenant.tenantId,
       tenant.organisationId,
+      authorization,
     );
   }
 
@@ -297,12 +299,14 @@ export class TrackingController {
     @Param('eventId') eventId: string,
     @Body() updateEventProgressDto: UpdateEventProgressDto,
     @TenantOrg() tenant: { tenantId: string; organisationId: string },
+    @Headers('authorization') authorization?: string,
   ): Promise<LessonTrack> {
     return this.trackingService.updateEventProgress(
       eventId,
       updateEventProgressDto,
       tenant.tenantId,
       tenant.organisationId,
+      authorization,
     );
   }
 

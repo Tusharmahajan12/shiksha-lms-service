@@ -167,11 +167,13 @@ async getAggregatedContent(
   async updateTestProgress(
     @Body() updateTestProgressDto: UpdateTestProgressDto,
     @TenantOrg() tenantOrg: { tenantId: string; organisationId: string },
+    @Headers('authorization') authorization?: string,
   ): Promise<any> {
     return this.aspireLeaderService.updateTestProgress(
       updateTestProgressDto,
       tenantOrg.tenantId,
       tenantOrg.organisationId,
+      authorization,
     );
   }
 } 
