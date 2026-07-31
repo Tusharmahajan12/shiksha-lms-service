@@ -901,6 +901,7 @@ export class AspireLeaderService {
     updateTestProgressDto: UpdateTestProgressDto,
     tenantId: string,
     organisationId: string,
+    authorization?: string,
   ): Promise<LessonTrack> {
     const startTime = Date.now();
     this.logger.log(
@@ -1017,6 +1018,7 @@ export class AspireLeaderService {
           updatedLessonTrack,
           tenantId,
           organisationId,
+          authorization,
         );
       }
 
