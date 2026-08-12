@@ -142,4 +142,4 @@ export class CourseReportDto {
   @Type(() => Boolean)
   @IsBoolean()
   certificateIssued?: boolean;
-} 
+}

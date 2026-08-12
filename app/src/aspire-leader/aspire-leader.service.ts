@@ -106,6 +106,19 @@ export class AspireLeaderService {
       );
     }
 
+    // Aspire Leaders-specific: restrict the already-fetched/paginated page to the
+    // calling admin's allowed countries when they're a Regional Admin - see
+    // filterReportItemsByCohortCountry() below. No-op (returns result unchanged)
+    // when reportDto.userId or reportDto.cohortId is absent, so this is fully
+    // backward-compatible with existing callers that don't send userId.
+    result = await this.filterReportItemsByCohortCountry(
+      result,
+      reportDto,
+      tenantId,
+      organisationId,
+      authorization,
+    );
+
     const duration = Date.now() - startTime;
     this.logger.log(
       `Report generated in ${duration}ms for courseId: ${reportDto.courseId}`,
@@ -494,6 +507,87 @@ export class AspireLeaderService {
       throw new BadRequestException(
         RESPONSE_MESSAGES.ERROR.FAILED_TO_FETCH_USER_DATA,
       );
+    }
+  }
+
+  /**
+   * Aspire Leaders-specific: restricts an already-fetched/paginated report page to the
+   * calling admin's allowed countries, by delegating to user-microservice's
+   * POST /cohortmember/report-filter (which resolves the admin's role and, for Regional
+   * Admins, their allowed countries, entirely server-side - see
+   * docs/regional-admin-cohort-country-report.md).
+   *
+   * The calling admin's identity is established by user-microservice itself, from
+   * this forwarded `authorization` bearer token (JwtAuthGuard verifies its signature
+   * against Keycloak's RSA public key) - there is deliberately no userId param on
+   * this request; a client-supplied one would have been spoofable and defeated the
+   * whole point of country filtering. No-op (returns `result` unchanged) when
+   * `reportDto.cohortId` or `authorization` is absent, so this is fully
+   * backward-compatible with every existing caller of this report.
+   *
+   * Caveat: filtering happens AFTER this page's DB-level pagination, so for a Regional
+   * Admin, `totalElements` still reflects the whole-cohort count and a page can come back
+   * with fewer than `limit` rows even though more allowed-country rows exist further in
+   * the pagination. This matches the chunk-then-filter shape the export pipeline already
+   * uses elsewhere; a fully accurate country-scoped total would require filtering before
+   * pagination, which is a larger follow-up if this proves confusing in the report UI.
+   *
+   * Fails closed: if the user-microservice call itself errors, this returns an EMPTY page
+   * rather than the unfiltered one - a broken country check must never silently expose
+   * data across countries.
+   */
+  private async filterReportItemsByCohortCountry(
+    result: { data: any[]; totalElements: number; offset: number; limit: number },
+    reportDto: CourseReportDto,
+    tenantId: string,
+    organisationId: string,
+    authorization: string,
+  ): Promise<typeof result> {
+    if (!authorization || !reportDto.cohortId || result.data.length === 0) {
+      return result;
+    }
+
+    const userIds = result.data.map((item) => item.userId).filter(Boolean);
+    if (userIds.length === 0) {
+      return result;
+    }
+
+    // Reached only after fetchUserData() already succeeded earlier in the same
+    // request, which requires USER_SERVICE_URL to be configured - so this is a
+    // defensive fallback, not a real bypass path.
+    const userServiceUrl = this.configService.get('USER_SERVICE_URL', '');
+    if (!userServiceUrl) {
+      return result;
+    }
+
+    try {
+      const response = await axios.post(
+        `${userServiceUrl}/cohortmember/report-filter`,
+        { cohortId: reportDto.cohortId, userIds },
+        {
+          headers: {
+            tenantid: tenantId,
+            organisationId: organisationId,
+            Authorization: authorization,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+
+      const eligibleUserIds = new Set(
+        (response.data?.result?.items ?? []).map((item: any) => item.userId),
+      );
+
+      return {
+        ...result,
+        data: result.data.filter((item) => eligibleUserIds.has(item.userId)),
+      };
+    } catch (error) {
+      this.logger.error(
+        'Cohort-country report-filter call failed - returning an empty page rather than risking unfiltered cross-country data',
+        error,
+      );
+      return { ...result, data: [] };
     }
   }
 
